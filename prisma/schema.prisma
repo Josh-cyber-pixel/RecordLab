@@ -1,0 +1,265 @@
+// School Record Keeping System — Prisma schema (standalone project)
+// Multi-tenant ready: every record is scoped by schoolId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenant & Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+model School {
+  id      String  @id @default(uuid())
+  name    String
+  code    String  @unique
+  address String?
+  phone   String?
+  email   String?
+  logo    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  classes         Class[]
+  students        Student[]
+  inventoryItems  InventoryItem[]
+  ledgerEntries   ClassLedger[]
+  libraryLoans    LibraryLoan[]
+  visitorLogs     VisitorLog[]
+  incidents       Incident[]
+  igfIncomes      IgfIncome[]
+  schoolProjects  SchoolProject[]
+
+  @@map("schools")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  ACCOUNTANT
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  schoolId     String
+  firstName    String
+  lastName     String
+  email        String     @unique
+  passwordHash String
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// School structure (classes used for grouping ledger + enrolment)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Class {
+  id       String   @id @default(uuid())
+  schoolId String
+  name     String   // e.g. KG1, KG2, B1 ... B9
+  order    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school  School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  ledger  ClassLedger[]
+  students Student[]
+
+  @@unique([schoolId, name])
+  @@map("classes")
+}
+
+// Enrolment roster — authoritative list of students per class
+model Student {
+  id        String   @id @default(uuid())
+  schoolId  String
+  classId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  class  Class  @relation(fields: [classId], references: [id])
+
+  @@unique([schoolId, classId, name])
+  @@map("students")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Inventory
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InventoryItem {
+  id        String   @id @default(uuid())
+  schoolId  String
+  name      String
+  quantity  Float    @default(0)
+  source    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2 & 3. Class Ledger — PTA dues + Printing fees (one table, typed)
+// Amount owing = expectedAmount − (term1 + term2 + term3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LedgerType {
+  PTA
+  PRINTING
+}
+
+model ClassLedger {
+  id             String     @id @default(uuid())
+  schoolId       String
+  type           LedgerType
+  classId        String
+  studentName    String
+  expectedAmount Float      @default(0)
+  term1Amount    Float      @default(0)
+  term2Amount    Float      @default(0)
+  term3Amount    Float      @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  class  Class  @relation(fields: [classId], references: [id])
+
+  @@unique([schoolId, type, classId, studentName])
+  @@map("class_ledger")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Library Loans — students + teachers (one table, typed)
+// status is DERIVED: dateReturned null → OUTSTANDING (RED), else RETURNED (BLUE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum LibraryBorrowerType {
+  STUDENT
+  TEACHER
+}
+
+model LibraryLoan {
+  id           String              @id @default(uuid())
+  schoolId     String
+  borrowerType LibraryBorrowerType
+  borrowerName String
+  bookTitle    String
+  dateReceived DateTime            @db.Date
+  dateReturned DateTime?           @db.Date
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("library_loans")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// School Visits
+// ─────────────────────────────────────────────────────────────────────────────
+
+model VisitorLog {
+  id            String   @id @default(uuid())
+  schoolId      String
+  date          DateTime @db.Date
+  visitorName   String
+  institution   String?
+  purpose       String?
+  arrivalTime   String?
+  departureTime String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("visitor_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daily reports — students + teachers (one table, typed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum IncidentPersonType {
+  STUDENT
+  TEACHER
+}
+
+model Incident {
+  id          String             @id @default(uuid())
+  schoolId    String
+  personType  IncidentPersonType
+  name        String
+  date        DateTime           @db.Date
+  incident    String
+  actionTaken String?
+  remarks     String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("incidents")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internally Generated Funds (IGF)
+// Worship + Canteen income (one table, typed) + School Projects
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum IgfSource {
+  WORSHIP
+  CANTEEN
+}
+
+model IgfIncome {
+  id        String   @id @default(uuid())
+  schoolId  String
+  source    IgfSource
+  date      DateTime @db.Date
+  amount    Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("igf_income")
+}
+
+model SchoolProject {
+  id          String   @id @default(uuid())
+  schoolId    String
+  date        DateTime @db.Date
+  projectType String
+  benefits    Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("school_projects")
+}
