@@ -41,7 +41,83 @@ async function main() {
     });
   }
 
+  // ── Demo academic year + terms ─────────────────────────────────────────────
+  const now = new Date();
+  const cy  = now.getFullYear();
+  const ayName = `${cy}/${cy + 1}`;
+  const year = await prisma.academicYear.upsert({
+    where: { schoolId_name: { schoolId: school.id, name: ayName } },
+    update: { isCurrent: true },
+    create: {
+      schoolId: school.id,
+      name: ayName,
+      startDate: new Date(cy, 0, 15),
+      endDate:   new Date(cy + 1, 6, 31),
+      isCurrent: true,
+      status: 'IN_PROGRESS',
+    },
+  });
+
+  const terms = [
+    { name: 'First Term',   isCurrent: true,  sd: new Date(cy, 0, 15),  ed: new Date(cy, 3, 30)  },
+    { name: 'Second Term',  isCurrent: false, sd: new Date(cy, 4, 15),  ed: new Date(cy, 7, 30)  },
+    { name: 'Third Term',   isCurrent: false, sd: new Date(cy, 8, 15),  ed: new Date(cy + 1, 0, 30) },
+  ];
+  for (const t of terms) {
+    await prisma.term.upsert({
+      where: { academicYearId_name: { academicYearId: year.id, name: t.name } },
+      update: { isCurrent: t.isCurrent },
+      create: {
+        schoolId: school.id,
+        academicYearId: year.id,
+        name: t.name,
+        startDate: t.sd,
+        endDate: t.ed,
+        isCurrent: t.isCurrent,
+      },
+    });
+  }
+  const currentTerm = await prisma.term.findFirst({ where: { schoolId: school.id, isCurrent: true } });
+
+  // ── Demo fee structures (PTA, Printing, Mock) for B7 on the current term ──
+  const b7 = await prisma.class.findFirst({ where: { schoolId: school.id, name: 'B7' } });
+  const demoFees = [
+    { label: 'PTA', amount: 50, description: 'Parent-Teacher Association dues' },
+    { label: 'Printing', amount: 30, description: 'Examination printing costs' },
+    { label: 'Mock', amount: 60, description: 'Mock examination fees' },
+  ];
+  if (b7 && currentTerm) {
+    for (const f of demoFees) {
+      const existing = await prisma.feeStructure.findFirst({
+        where: { schoolId: school.id, classId: b7.id, termId: currentTerm.id, label: f.label },
+      });
+      if (!existing) {
+        await prisma.feeStructure.create({
+          data: { ...f, schoolId: school.id, classId: b7.id, termId: currentTerm.id },
+        });
+      }
+    }
+  }
+
+  // ── Demo teacher ───────────────────────────────────────────────────────────
+  const teacherHash = await bcrypt.hash('Teacher@1234', 12);
+  await prisma.user.upsert({
+    where: { email: 'teacher@school.com' },
+    update: {},
+    create: {
+      schoolId: school.id,
+      firstName: 'Demo',
+      lastName: 'Teacher',
+      email: 'teacher@school.com',
+      phone: '+233 111 111 111',
+      teacherNo: 'T-0001',
+      passwordHash: teacherHash,
+      role: 'TEACHER',
+    },
+  });
+
   console.log('Seed complete. Admin login: admin@school.com / Admin@1234');
+  console.log('Teacher login: teacher@school.com / Teacher@1234');
 }
 
 main()

@@ -20,9 +20,14 @@ const libraryRoutes     = require('./modules/library/library.routes');
 const visitorsRoutes    = require('./modules/visitors/visitors.routes');
 const incidentsRoutes   = require('./modules/incidents/incidents.routes');
 const igfRoutes         = require('./modules/igf/igf.routes');
+const expensesRoutes    = require('./modules/expenses/expenses.routes');
+const financeRoutes     = require('./modules/finance/finance.routes');
+const academicRoutes    = require('./modules/academic/academic.routes');
+const feesRoutes        = require('./modules/fees/fees.routes');
+const studentsRoutes    = require('./modules/students/students.routes');
 const classesRoutes     = require('./modules/classes/classes.routes');
-const enrollmentRoutes  = require('./modules/enrollment/enrollment.routes');
 const achievementsRoutes = require('./modules/achievements/achievements.routes');
+const projectsRoutes    = require('./modules/projects/projects.routes');
 
 const app = express();
 
@@ -82,9 +87,15 @@ app.use('/api/library',      apiLimiter,  libraryRoutes);
 app.use('/api/visitors',     apiLimiter,  visitorsRoutes);
 app.use('/api/incidents',    apiLimiter,  incidentsRoutes);
 app.use('/api/igf',          apiLimiter,  igfRoutes);
+app.use('/api/expenses',     apiLimiter,  expensesRoutes);
+app.use('/api/finance',      apiLimiter,  financeRoutes);
+app.use('/api/academic',     apiLimiter,  academicRoutes);
+app.use('/api/fees',         apiLimiter,  feesRoutes);
+app.use('/api/students',     apiLimiter,  studentsRoutes);
+app.use('/api/enrollment',   apiLimiter,  studentsRoutes); // legacy alias
 app.use('/api/classes',      apiLimiter,  classesRoutes);
-app.use('/api/enrollment',   apiLimiter,  enrollmentRoutes);
 app.use('/api/achievements', apiLimiter,  achievementsRoutes);
+app.use('/api/projects',     apiLimiter,  projectsRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((req, res, next) => next(notFoundError(`Route ${req.originalUrl} not found.`)));

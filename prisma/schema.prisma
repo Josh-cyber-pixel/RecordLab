@@ -29,12 +29,20 @@ model School {
   classes         Class[]
   students        Student[]
   inventoryItems  InventoryItem[]
+  libraryBooks    LibraryBook[]
   ledgerEntries   ClassLedger[]
   libraryLoans    LibraryLoan[]
   visitorLogs     VisitorLog[]
   incidents       Incident[]
-  igfIncomes      IgfIncome[]
-  schoolProjects  SchoolProject[]
+  incomes         Income[]
+  expenses        Expense[]
+  projects        Project[]
+  academicYears   AcademicYear[]
+  terms           Term[]
+  feeStructures   FeeStructure[]
+  invoices        Invoice[]
+  payments        Payment[]
+  subjects        Subject[]
 
   @@map("schools")
 }
@@ -58,6 +66,8 @@ model User {
   firstName    String
   lastName     String
   email        String     @unique
+  phone        String?
+  teacherNo    String?
   passwordHash String
   role         Role
   status       UserStatus @default(ACTIVE)
@@ -65,6 +75,9 @@ model User {
   updatedAt    DateTime   @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  classSubjects ClassSubject[]
+  expenses      Expense[]
 
   @@map("users")
 }
@@ -84,9 +97,43 @@ model Class {
   school  School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   ledger  ClassLedger[]
   students Student[]
+  feeStructures FeeStructure[]
+  classSubjects ClassSubject[]
 
   @@unique([schoolId, name])
   @@map("classes")
+}
+
+// Subjects taught in a school; a teacher is assigned to a class+subject via ClassSubject
+model Subject {
+  id          String   @id @default(uuid())
+  schoolId    String
+  name        String
+  code        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school        School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  classSubjects ClassSubject[]
+
+  @@unique([schoolId, code])
+  @@map("subjects")
+}
+
+// A class+subject pairing; assigning a teacher sets teacherId on the row.
+// One teacher per class+subject (school-ms ClassSubject pattern).
+model ClassSubject {
+  classId   String
+  subjectId String
+  teacherId String?
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher User?   @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+
+  @@id([classId, subjectId])
+  @@map("class_subjects")
 }
 
 // Enrolment roster — authoritative list of students per class
@@ -95,11 +142,27 @@ model Student {
   schoolId  String
   classId   String
   name      String
+  studentCode String?  @unique // e.g. STU-0001-2026
+  firstName String?
+  lastName  String?
+  gender    String?
+  dateOfBirth DateTime? @db.Date
+  address   String?
+  bloodGroup String?
+  medicalNotes String?
+  guardianName String?
+  guardianPhone String?
+  guardianRelation String?
+  residentialStatus String? @default("DAY") // DAY | BOARDING
+  enrollmentTermId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   class  Class  @relation(fields: [classId], references: [id])
+  enrollmentTerm Term? @relation(fields: [enrollmentTermId], references: [id], onDelete: SetNull)
+
+  invoices Invoice[]
 
   @@unique([schoolId, classId, name])
   @@map("students")
@@ -109,16 +172,30 @@ model Student {
 // 1. Inventory
 // ─────────────────────────────────────────────────────────────────────────────
 
-model InventoryItem {
-  id        String   @id @default(uuid())
-  schoolId  String
-  name      String
-  quantity  Float    @default(0)
-  source    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Inventory
+// ─────────────────────────────────────────────────────────────────────────────
 
-  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+enum InventoryCategory {
+  BOOKS
+  STATIONERY
+  EQUIPMENT
+  OTHER
+}
+
+model InventoryItem {
+  id            String            @id @default(uuid())
+  schoolId      String
+  name          String
+  category      InventoryCategory @default(OTHER)
+  quantity      Float             @default(0)
+  source        String?
+  libraryBookId String?           @unique
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  school     School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  libraryBook LibraryBook? @relation(fields: [libraryBookId], references: [id], onDelete: SetNull)
 
   @@map("inventory_items")
 }
@@ -154,8 +231,11 @@ model ClassLedger {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Library Loans — students + teachers (one table, typed)
-// status is DERIVED: dateReturned null → OUTSTANDING (RED), else RETURNED (BLUE)
+// 4. Library — full mini library system
+//    LibraryBook = stock (title, author, total copies in the library).
+//    Available copies = totalCopies − (number of outstanding loans on that book).
+//    LibraryLoan  = a borrower taking out a copy (student/teacher).
+//    status is DERIVED: dateReturned null → OUTSTANDING, else RETURNED.
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum LibraryBorrowerType {
@@ -163,18 +243,37 @@ enum LibraryBorrowerType {
   TEACHER
 }
 
+model LibraryBook {
+  id          String    @id @default(uuid())
+  schoolId    String
+  title       String
+  author      String?
+  totalCopies Int       @default(1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  school        School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  loans         LibraryLoan[]
+  inventoryItem InventoryItem?
+
+  @@map("library_books")
+}
+
 model LibraryLoan {
   id           String              @id @default(uuid())
   schoolId     String
+  bookId       String?
   borrowerType LibraryBorrowerType
   borrowerName String
+  borrowerCode String?             // student STU-* or teacher T-* code
   bookTitle    String
   dateReceived DateTime            @db.Date
   dateReturned DateTime?           @db.Date
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
-  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  book   LibraryBook? @relation(fields: [bookId], references: [id], onDelete: SetNull)
 
   @@map("library_loans")
 }
@@ -231,15 +330,13 @@ model Incident {
 // Worship + Canteen income (one table, typed) + School Projects
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum IgfSource {
-  WORSHIP
-  CANTEEN
-}
+// Income (from any source — Worship, Canteen, Donations, EGF, etc.) + Expenses
+// ─────────────────────────────────────────────────────────────────────────────
 
-model IgfIncome {
+model Income {
   id        String   @id @default(uuid())
   schoolId  String
-  source    IgfSource
+  source    String   // free text: Worship, Canteen, Donations, EGF, Rent, etc.
   date      DateTime @db.Date
   amount    Float
   createdAt DateTime @default(now())
@@ -247,19 +344,200 @@ model IgfIncome {
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
-  @@map("igf_income")
+  @@map("incomes")
 }
 
-model SchoolProject {
+enum ExpensePaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CARD
+}
+
+model Expense {
+  id             String   @id @default(uuid())
+  schoolId       String
+  date           DateTime @db.Date
+  category       String
+  subCategory    String
+  description    String?
+  payee          String
+  amount         Float
+  paymentMethod  ExpensePaymentMethod
+  sourceOfIncome String   // which fund funds the expenditure: IGF / EGF / OTHER
+  receipt        String?
+  recordedById   String
+  projectId      String?  @unique // set when this expense was generated by a school project
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school     School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  recordedBy User      @relation(fields: [recordedById], references: [id])
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("expenses")
+}
+
+// School Projects — any undertaking by the school. Each project creates a linked
+// Expense record (category PROJECTS) because it is a direct deduction from the school fund.
+enum ProjectStatus {
+  PLANNED
+  ONGOING
+  COMPLETED
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  schoolId    String
+  name        String
+  description String?
+  startDate   DateTime      @db.Date
+  amount      Float
+  fundSource  String        @default("IGF") // IGF / EGF / OTHER
+  status      ProjectStatus @default(ONGOING)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  school  School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  expense Expense?
+
+  @@map("projects")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Finance — Fee structures → Invoices → Payments → Receipts
+// -----------------------------------------------------------------------------
+
+enum AcademicYearStatus {
+  IN_PROGRESS
+  DONE
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CARD
+  PAYSTACK
+}
+
+model AcademicYear {
+  id        String             @id @default(uuid())
+  schoolId  String
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean            @default(false)
+  status    AcademicYearStatus @default(IN_PROGRESS)
+  createdAt DateTime           @default(now())
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  terms  Term[]
+
+  @@unique([schoolId, name])
+  @@map("academic_years")
+}
+
+model Term {
+  id             String   @id @default(uuid())
+  academicYearId String
+  schoolId       String
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  isCurrent      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  academicYear  AcademicYear   @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  school        School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  feeStructures FeeStructure[]
+  invoices      Invoice[]
+  enrolledStudents Student[]
+
+  @@unique([academicYearId, name])
+  @@map("terms")
+}
+
+model FeeStructure {
   id          String   @id @default(uuid())
   schoolId    String
-  date        DateTime @db.Date
-  projectType String
-  benefits    Float
+  classId     String
+  termId      String
+  label       String
+  amount      Float
+  dueDate     DateTime?
+  description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school       School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  class        Class         @relation(fields: [classId], references: [id])
+  term         Term          @relation(fields: [termId], references: [id])
+  invoiceItems InvoiceItem[]
 
-  @@map("school_projects")
+  @@unique([schoolId, classId, termId, label])
+  @@map("fee_structures")
+}
+
+model Invoice {
+  id          String        @id @default(uuid())
+  schoolId    String
+  studentId   String
+  termId      String
+  invoiceNo   String        @unique
+  totalAmount Float
+  paidAmount  Float         @default(0)
+  balance     Float
+  status      InvoiceStatus @default(UNPAID)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  school  School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student Student       @relation(fields: [studentId], references: [id])
+  term    Term          @relation(fields: [termId], references: [id])
+  items   InvoiceItem[]
+  payments Payment[]
+
+  @@unique([schoolId, studentId, termId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id             String  @id @default(uuid())
+  invoiceId      String
+  feeStructureId String?
+  label          String
+  amount         Float
+  paidAmount     Float   @default(0)
+
+  invoice      Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  feeStructure FeeStructure? @relation(fields: [feeStructureId], references: [id], onDelete: SetNull)
+
+  @@map("invoice_items")
+}
+
+model Payment {
+  id           String        @id @default(uuid())
+  schoolId     String
+  invoiceId    String
+  amount       Float
+  method       PaymentMethod
+  reference    String?
+  receiptNo    String        @unique
+  paidAt       DateTime      @default(now())
+  receivedById String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+
+  school  School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
 }

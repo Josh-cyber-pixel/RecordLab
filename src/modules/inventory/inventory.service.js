@@ -2,6 +2,50 @@
 const prisma = require('../../config/prisma');
 const { notFoundError } = require('../../utils/errors');
 
+const CATEGORY_BOOKS = 'BOOKS';
+const VALID_CATEGORIES = ['BOOKS', 'STATIONERY', 'EQUIPMENT', 'OTHER'];
+
+function normalize(input) {
+  const category = input.category && input.category !== ''
+    ? String(input.category).toUpperCase()
+    : 'OTHER';
+  return {
+    name:     input.name,
+    category: VALID_CATEGORIES.includes(category) ? category : 'OTHER',
+    quantity: input.quantity != null ? parseFloat(input.quantity) : 0,
+    source:   input.source ?? null,
+    author:   input.author ?? null,
+  };
+}
+
+// Ensure a LibraryBook exists for a BOOKS-category inventory item and keep its
+// stock in sync with the inventory quantity. Returns the LibraryBook or null.
+async function syncLibraryBook(item, data) {
+  if (data.category !== CATEGORY_BOOKS) return null;
+
+  const copies = Math.max(0, Math.floor(data.quantity || 0));
+  const existing = item.libraryBookId
+    ? await prisma.libraryBook.findUnique({ where: { id: item.libraryBookId } })
+    : null;
+
+  if (existing) {
+    return prisma.libraryBook.update({
+      where: { id: existing.id },
+      data:  { title: data.name, author: data.author ?? existing.author, totalCopies: copies },
+    });
+  }
+
+  return prisma.libraryBook.create({
+    data: {
+      schoolId:    item.schoolId,
+      title:       data.name,
+      author:      data.author ?? null,
+      totalCopies: copies,
+      inventoryItem: { connect: { id: item.id } },
+    },
+  });
+}
+
 async function listInventory(schoolId) {
   const items = await prisma.inventoryItem.findMany({
     where: { schoolId },
@@ -16,27 +60,53 @@ async function getInventoryItem(id, schoolId) {
   return item;
 }
 
-async function createInventoryItem(data, schoolId) {
-  return prisma.inventoryItem.create({
+async function createInventoryItem(input, schoolId) {
+  const data = normalize(input);
+  const item = await prisma.inventoryItem.create({
     data: {
       schoolId,
       name:     data.name,
-      quantity: data.quantity != null ? parseFloat(data.quantity) : 0,
-      source:   data.source ?? null,
+      category: data.category,
+      quantity: data.quantity,
+      source:   data.source,
     },
   });
+
+  const libraryBook = await syncLibraryBook(item, data);
+  if (libraryBook) {
+    return prisma.inventoryItem.update({
+      where: { id: item.id },
+      data:  { libraryBookId: libraryBook.id },
+    });
+  }
+  return item;
 }
 
-async function updateInventoryItem(id, data, schoolId) {
+async function updateInventoryItem(id, input, schoolId) {
   await getInventoryItem(id, schoolId);
-  return prisma.inventoryItem.update({
+  const data = normalize(input);
+
+  const updated = await prisma.inventoryItem.update({
     where: { id },
     data: {
       name:     data.name,
-      quantity: data.quantity != null ? parseFloat(data.quantity) : undefined,
-      source:   data.source ?? undefined,
+      category: data.category,
+      quantity: data.quantity,
+      source:   data.source ?? null,
     },
   });
+
+  if (data.category === CATEGORY_BOOKS) {
+    const libraryBook = await syncLibraryBook(updated, data);
+    if (libraryBook && !updated.libraryBookId) {
+      return prisma.inventoryItem.update({
+        where: { id },
+        data:  { libraryBookId: libraryBook.id },
+      });
+    }
+  }
+
+  return updated;
 }
 
 async function deleteInventoryItem(id, schoolId) {

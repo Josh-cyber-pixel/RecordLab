@@ -1,40 +1,36 @@
 // src/modules/achievements/achievements.service.js
 const prisma = require('../../config/prisma');
 
-// General achievements — aggregates PTA collections and IGF income into one view.
+// General achievements — aggregates fee collection, income and expenses.
 async function getAchievements(schoolId) {
-  const [ptaEntries, igfIncome, igfProjects, studentCount, teacherCount] = await Promise.all([
-    prisma.classLedger.findMany({ where: { schoolId, type: 'PTA' } }),
-    prisma.igfIncome.findMany({ where: { schoolId } }),
-    prisma.schoolProject.findMany({ where: { schoolId } }),
+  const [incomes, expenses, studentCount, teacherCount, payments] = await Promise.all([
+    prisma.income.findMany({ where: { schoolId } }),
+    prisma.expense.findMany({ where: { schoolId } }),
     prisma.student.count({ where: { schoolId } }),
     prisma.user.count({ where: { schoolId, role: 'TEACHER' } }),
+    prisma.payment.findMany({ where: { schoolId } }),
   ]);
 
-  const paid = ptaEntries.reduce((s, e) => s + (e.term1Amount || 0) + (e.term2Amount || 0) + (e.term3Amount || 0), 0);
-  const expected = ptaEntries.reduce((s, e) => s + (e.expectedAmount || 0), 0);
+  const byIncomeSource = {};
+  let incomeTotal = 0;
+  for (const i of incomes) { byIncomeSource[i.source] = (byIncomeSource[i.source] || 0) + i.amount; incomeTotal += i.amount; }
 
-  const igfBySource = { WORSHIP: 0, CANTEEN: 0 };
-  let igfTotal = 0;
-  for (const i of igfIncome) { igfBySource[i.source] = (igfBySource[i.source] || 0) + i.amount; igfTotal += i.amount; }
-  const projectBenefits = igfProjects.reduce((s, p) => s + p.benefits, 0);
+  const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const paymentsTotal = payments.reduce((s, p) => s + p.amount, 0);
 
   return {
     enrolment: { students: studentCount, teachers: teacherCount },
-    pta: {
-      rows: ptaEntries.length,
-      expected,
-      collected: paid,
-      owing: expected - paid,
+    income: {
+      bySource: byIncomeSource,
+      incomeCount: incomes.length,
+      incomeTotal,
     },
-    igf: {
-      bySource: igfBySource,
-      worship: igfBySource.WORSHIP,
-      canteen: igfBySource.CANTEEN,
-      incomeTotal: igfTotal,
-      projects: { count: igfProjects.length, benefits: projectBenefits },
+    expenses: {
+      count: expenses.length,
+      total: expenseTotal,
     },
-    grandTotal: paid + igfTotal + projectBenefits,
+    netPosition: incomeTotal + paymentsTotal - expenseTotal,
+    grandTotal: incomeTotal + paymentsTotal,
     generatedAt: new Date().toISOString(),
   };
 }

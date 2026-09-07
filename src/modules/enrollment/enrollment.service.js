@@ -56,7 +56,7 @@ async function deleteStudent(id, schoolId) {
 async function listTeachers(schoolId) {
   const teachers = await prisma.user.findMany({
     where: { schoolId, role: 'TEACHER' },
-    select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true },
+    select: { id: true, firstName: true, lastName: true, email: true, status: true },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
   });
   return teachers;
