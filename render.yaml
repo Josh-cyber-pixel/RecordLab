@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: school-record-keeping-api
+    runtime: node
+    plan: starter
+    healthCheckPath: /api/health
+    buildCommand: npm install
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: node src/app.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: school-record-keeping-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CLIENT_URL
+        sync: false
+        value: https://school-record-keeping.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+        value: ""
+
+databases:
+  - name: school-record-keeping-db
+    plan: basic-256mb
+    databaseName: school_record_keeping
+    user: srk_admin
