@@ -11,4 +11,8 @@ const env = {
   CORS_ORIGINS:  process.env.CORS_ORIGINS || '',
 };
 
+if (env.NODE_ENV === 'production' && (!env.JWT_SECRET || env.JWT_SECRET === 'dev_secret_change_me')) {
+  throw new Error('JWT_SECRET must be set to a strong random value in production (boot aborted).');
+}
+
 module.exports = env;

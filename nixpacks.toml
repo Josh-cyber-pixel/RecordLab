@@ -1,0 +1,9 @@
+# Koyeb deploy config (consumed by Koyeb's Nixpacks builder)
+[phases.install]
+cmds = ["npm ci"]
+
+[start]
+cmd = "npx prisma migrate deploy && node src/app.js"
+
+[healthcheck]
+path = "/api/health"

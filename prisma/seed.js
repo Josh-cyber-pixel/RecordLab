@@ -4,7 +4,9 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('Admin@1234', 12);
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@school.com';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@1234';
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
 
   const school = await prisma.school.upsert({
     where: { code: 'DEMO' },
@@ -19,13 +21,13 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { email: 'admin@school.com' },
+    where: { email: adminEmail },
     update: {},
     create: {
       schoolId: school.id,
       firstName: 'Admin',
       lastName: 'User',
-      email: 'admin@school.com',
+      email: adminEmail,
       passwordHash,
       role: 'ADMIN',
     },
@@ -116,7 +118,7 @@ async function main() {
     },
   });
 
-  console.log('Seed complete. Admin login: admin@school.com / Admin@1234');
+  console.log(`Seed complete. Admin login: ${adminEmail} / ${process.env.ADMIN_PASSWORD ? '(from ADMIN_PASSWORD env)' : 'Admin@1234'}`);
   console.log('Teacher login: teacher@school.com / Teacher@1234');
 }
 
