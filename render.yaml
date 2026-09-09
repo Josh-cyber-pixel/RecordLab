@@ -1,0 +1,23 @@
+# Render web service (free plan) — database is external (Neon), so no Render Postgres needed
+services:
+  - type: web
+    name: school-record-keeping-api
+    runtime: node
+    plan: free
+    healthCheckPath: /api/health
+    buildCommand: npm ci
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: node src/app.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CLIENT_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
