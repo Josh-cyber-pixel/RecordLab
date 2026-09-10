@@ -18,6 +18,6 @@ services:
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: CLIENT_URL
-        sync: false
+        value: https://recordlab.edutrackgh.app
       - key: CORS_ORIGINS
         sync: false
